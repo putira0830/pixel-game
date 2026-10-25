@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>ピクセルアイランド</title>
+<style>
+:root{--ink:#382f35;--cream:#fff4d8;--wood:#8e593d}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:#172b35;color:var(--ink);font-family:"Trebuchet MS","Yu Gothic",sans-serif;overflow:hidden}
+#app{height:100%;display:flex;align-items:center;justify-content:center;padding:10px}
+#frame{position:relative;width:min(100%,1100px);aspect-ratio:16/10;max-height:100%;border:5px solid #f7dca2;border-radius:12px;overflow:hidden;box-shadow:0 12px 50px #0008;background:#8bcf83}
+canvas{display:block;width:100%;height:100%;image-rendering:pixelated;image-rendering:crisp-edges}
+#hud{position:absolute;inset:0;pointer-events:none}
+.panel{background:#fff1cfed;border:3px solid #b87b4e;border-radius:12px;box-shadow:0 3px 0 #6c4738;padding:8px 12px;color:#493a31;text-shadow:0 1px #fff}
+#brand{position:absolute;top:3%;left:2%;font-weight:900;font-size:clamp(12px,2.1vw,24px);line-height:1.1;transform:rotate(-2deg)}
+#brand small{display:block;font-size:.52em;color:#b45147;margin-top:4px;letter-spacing:2px}
+#clock{position:absolute;right:2%;top:3%;text-align:right;font-size:clamp(10px,1.5vw,16px);font-weight:bold}
+#task{position:absolute;left:2%;bottom:3%;max-width:55%;font-size:clamp(10px,1.25vw,14px);line-height:1.35}
+#toast{position:absolute;left:50%;top:16%;transform:translateX(-50%);font-weight:bold;opacity:0;transition:opacity .2s;white-space:nowrap;font-size:clamp(11px,1.5vw,16px)}
+#dialog{display:none;position:absolute;left:15%;right:15%;bottom:12%;padding:14px 18px 12px;background:#fff4dcf5;border:4px solid #b67c4e;border-radius:14px;box-shadow:0 5px 0 #714733;font-size:clamp(12px,1.6vw,18px);line-height:1.5;pointer-events:auto}
+#dialog strong{display:block;color:#347c66;margin-bottom:4px}
+#dialog button{float:right;border:0;background:#e9b45e;border-radius:8px;padding:5px 12px;font-weight:bold;color:#4b3328}
+#controls{position:absolute;right:2%;bottom:3%;display:flex;gap:5px;pointer-events:auto}
+.action{border:2px solid #986343;background:#fff1d9eF;color:#4a3a30;border-radius:9px;font-weight:800;padding:7px 10px;font-size:clamp(10px,1.15vw,13px);box-shadow:0 3px 0 #754b36;cursor:pointer}
+.action:active{transform:translateY(2px);box-shadow:0 1px 0 #754b36}
+#bag{display:none;position:absolute;inset:15% 20%;pointer-events:auto;background:#fff1d9f5;border:4px solid #b67c4e;border-radius:14px;padding:14px;box-shadow:0 5px 0 #714733}
+#bag h3{margin:0 0 10px}#items{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.item{background:#f9dfac;border:2px solid #d2a36a;border-radius:9px;padding:8px;text-align:center;font-size:clamp(11px,1.4vw,15px)}
+#mobile{position:absolute;left:2%;bottom:3%;display:none;pointer-events:auto;grid-template-columns:repeat(3,38px);grid-template-rows:repeat(2,34px);gap:3px}
+#mobile button{border:2px solid #986343;border-radius:8px;background:#fff1d9eF;font-weight:bold;color:#4a3a30}
+@media(max-width:650px){#app{padding:3px}#frame{width:100%;max-height:none;border-width:3px;aspect-ratio:4/5}#mobile{display:grid}#task{bottom:18%;max-width:60%}#controls{bottom:3%;right:2%}.action{padding:6px 7px}#dialog{left:5%;right:5%;bottom:23%}#bag{inset:20% 5%}#clock{max-width:40%}}
+</style></head>
+<body><div id="app"><div id="frame"><canvas id="game" width="800" height="500"></canvas><div id="hud">
+<div id="brand" class="panel">🌿 ピクセルアイランド<small>のんびり島ぐらし</small></div>
+<div id="clock" class="panel">5月12日（日）<br><span id="time">AM 10:30</span> ☀️</div>
+<div id="task" class="panel">今日の暮らし<br>🍎 木の実を集めよう！</div>
+<div id="toast" class="panel"></div>
+<div id="controls"><button class="action" id="talk">A はなす</button><button class="action" id="pick">B ひろう</button><button class="action" id="bagbtn">🎒 もちもの</button></div>
+<div id="mobile"><span></span><button data-dir="up">▲</button><span></span><button data-dir="left">◀</button><button data-dir="down">▼</button><button data-dir="right">▶</button></div>
+<div id="dialog"><strong id="speaker">どうぶつの住民</strong><span id="line"></span><button id="next">つづける ▼</button></div>
+<div id="bag"><h3>🎒 もちもの</h3><div id="items"></div><button class="action" id="closebag" style="margin-top:12px">とじる</button></div>
+</div></div></div>
+<script>
+(()=>{
+const c=document.getElementById('game'),ctx=c.getContext('2d');ctx.imageSmoothingEnabled=false;
+const W=800,H=500, tile=32;
+let px=400,py=285,face='down',frame=0,fruit=0,flowers=0,fish=0,dayMinutes=630,dialogue=false,bagOpen=false,toastTimer=0;
+const keys={}; const villagers=[
+{x:495,y:245,name:'ミント',type:'cat',color:'#5b91ba',shirt:'#ef9a9a',lines:['こんにちは！今日は風が気持ちいいね。','花壇のお花、昨日より元気になったみたい！','海の近くで珍しい貝が見つかることがあるよ。']},
+{x:285,y:235,name:'ポポ',type:'deer',color:'#c98545',shirt:'#83b9a1',lines:['この島って、歩いているだけで楽しいね！','木の実を見つけたら、少し分けてね。','夕方の空は、オレンジ色できれいなんだ。']},
+{x:610,y:315,name:'モコ',type:'bear',color:'#b97965',shirt:'#e9c96c',lines:['ぼく、お魚のにおいに詳しいんだ。たぶん！','おうちに家具を置くと、気分が変わるよ。']}
+];
+const trees=[{x:90,y:185,r:1.2,fruit:true},{x:165,y:260,r:1,fruit:false},{x:690,y:195,r:1.15,fruit:true},{x:740,y:265,r:.9,fruit:false},{x:335,y:130,r:.85,fruit:false},{x:560,y:135,r:1,fruit:true},{x:80,y:330,r:.85,fruit:false}];
+const houses=[{x:345,y:180,w:120,h:86,wall:'#c8794a',roof:'#65557f',name:'じぶんの家'},{x:555,y:205,w:88,h:65,wall:'#d7a15f',roof:'#4b8171',name:'おみせ'}];
+const flowerspots=[];for(let i=0;i<65;i++){flowerspots.push({x:18+((i*97)%765),y:135+((i*53)%280),color:['#f6d76b','#ef8f9e','#fff1d0','#bda4e8'][i%4],s:.6+(i%4)*.12})}
+function rect(x,y,w,h,col){ctx.fillStyle=col;ctx.fillRect(Math.round(x),Math.round(y),Math.round(w),Math.round(h))}
+function poly(points,col){ctx.fillStyle=col;ctx.beginPath();points.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.closePath();ctx.fill()}
+function ellipse(x,y,rx,ry,col){ctx.fillStyle=col;ctx.beginPath();ctx.ellipse(x,y,rx,ry,0,0,Math.PI*2);ctx.fill()}
+function text(t,x,y,size,col='#fff4d8'){ctx.font=`bold ${size}px monospace`;ctx.lineWidth=3;ctx.strokeStyle='#684d3b';ctx.strokeText(t,x,y);ctx.fillStyle=col;ctx.fillText(t,x,y)}
+function drawGround(){
+rect(0,0,W,H,'#79bd69');
+// upper forest canopy
+for(let x=-20;x<850;x+=48){ellipse(x,75+(x%4)*3,38,48,'#3d925c');ellipse(x+10,80,28,36,'#54aa63')}
+rect(0,110,W,390,'#8bce79');
+for(let y=125;y<500;y+=32)for(let x=(y%64?0:16);x<800;x+=32){if(((x*7+y*11)%13)<5)rect(x,y,2,2,'#6dbb6b')}
+// river on left, curving downward
+poly([[0,260],[35,254],[64,268],[84,294],[72,320],[95,347],[81,380],[104,410],[85,445],[110,500],[0,500]],'#4bb6d0');
+poly([[0,273],[30,268],[57,279],[72,300],[61,322],[80,347],[67,378],[88,414],[71,446],[92,500],[0,500]],'#6ed4df');
+for(let i=0;i<26;i++){let x=(i*37)%100,y=270+(i*61)%220;rect(x,y,10,2,'#a5eff0')}
+// sandy paths
+poly([[280,500],[350,365],[335,310],[380,265],[380,235],[425,235],[425,280],[380,320],[390,365],[350,500]],'#d9b77c');
+poly([[370,305],[485,305],[570,330],[800,345],[800,382],[565,360],[480,335],[370,335]],'#d9b77c');
+poly([[385,280],[390,220],[420,220],[420,280]],'#d9b77c');
+for(let i=0;i<180;i++){let x=(i*67)%800,y=120+(i*41)%380;if(y>200&&x>330&&x<435)continue;if((x+y)%4===0)rect(x,y,2,2,'#f0d49b')}
+// stepping stones
+for(let i=0;i<6;i++){ellipse(82+i*3,325+i*25,9,5,'#a5c4a1');ellipse(84+i*3,323+i*25,7,3,'#c7d8b7')}
+}
+function drawFlowers(){
+for(const f of flowerspots){if(f.x<105&&f.y>260)continue;if(f.x>330&&f.x<440&&f.y>230&&f.y<370)continue;
+rect(f.x,f.y,2,5,'#438951');rect(f.x-2,f.y+2,3,2,'#55a85a');rect(f.x+2,f.y+3,3,2,'#55a85a');
+rect(f.x-3,f.y-3,3,3,f.color);rect(f.x+2,f.y-3,3,3,f.color);rect(f.x-1,f.y-6,3,3,f.color);rect(f.x-1,f.y,3,3,f.color);rect(f.x,f.y-2,2,2,'#f8df77');
+}}
+function drawTree(t){
+let x=t.x,y=t.y,s=t.r;ellipse(x+3,y+8,20*s,8*s,'#407d4b');rect(x-5*s,y-4*s,10*s,26*s,'#926044');rect(x-7*s,y-4*s,4*s,24*s,'#b77c52');
+ellipse(x,y-16*s,26*s,28*s,'#3b8a50');ellipse(x-13*s,y-7*s,17*s,18*s,'#4caa5a');ellipse(x+12*s,y-13*s,17*s,19*s,'#61b85e');ellipse(x-3*s,y-28*s,15*s,14*s,'#78c96a');
+for(let i=0;i<6;i++)rect(x+((i*13)%30-15)*s,y+((i*17)%25-28)*s,3*s,3*s,'#8ad276');
+if(t.fruit){[[x-12*s,y-12*s],[x+10*s,y-1*s],[x+3*s,y-27*s]].forEach(p=>{ellipse(p[0],p[1],4*s,5*s,'#d84d4b');rect(p[0],p[1]-6*s,2*s,3*s,'#417d3d')})}
+}
+function drawHouse(h){
+let {x,y,w,h:hh,wall,roof}=h;
+ellipse(x+w/2,y+hh+4,w*.7,10,'#548f58');
+poly([[x-9,y+16],[x+w/2,y-38],[x+w+9,y+16],[x+w,y+28],[x+w/2,y-20],[x,y+28]],roof);
+poly([[x,y+15],[x+w/2,y-24],[x+w,y+15],[x+w,y+hh],[x,y+hh]],wall);
+poly([[x,y+15],[x+w/2,y-24],[x+w/2,y+hh],[x,y+hh]],'#d58c56');
+rect(x+8,y+27,22,24,'#f2d39a');rect(x+11,y+30,16,18,'#7fc4ce');rect(x+18,y+30,3,18,'#e7d4a2');rect(x+11,y+37,16,3,'#e7d4a2');
+rect(x+w-31,y+27,22,24,'#f2d39a');rect(x+w-28,y+30,16,18,'#7fc4ce');rect(x+w-21,y+30,3,18,'#e7d4a2');rect(x+w-28,y+37,16,3,'#e7d4a2');
+rect(x+w/2-12,y+hh-35,24,35,'#704936');rect(x+w/2-8,y+hh-31,16,31,'#986447');ellipse(x+w/2+6,y+hh-17,2,2,'#f8d56b');
+for(let i=0;i<5;i++)rect(x-3+i*(w+6)/5,y+15,5,5,'#e4bb7d');
+}
+function drawPondDetails(){// village bulletin board and lamp
+rect(245,226,4,32,'#76513a');rect(225,208,44,26,'#94623d');rect(229,212,36,18,'#f1d8a0');rect(233,215,10,2,'#d18c65');rect(233,220,28,2,'#b1a17a');rect(233,224,21,2,'#b1a17a');
+rect(520,268,4,36,'#71523b');rect(514,258,16,13,'#e6c17c');rect(517,261,10,7,'#fff1b5');}
+function drawAnimal(v){
+let x=v.x,y=v.y;ellipse(x,y+13,15,5,'#5e9b5c');
+if(v.type==='cat'){poly([[x-12,y-10],[x-13,y-28],[x-2,y-19]],v.color);poly([[x+2,y-19],[x+13,y-29],[x+12,y-9]],v.color)}
+if(v.type==='deer'){poly([[x-10,y-14],[x-18,y-28],[x-12,y-31],[x-6,y-17]],v.color);poly([[x+10,y-14],[x+18,y-28],[x+12,y-31],[x+6,y-17]],v.color)}
+ellipse(x,y-14,13,16,v.color);ellipse(x,y-7,11,9,v.color);
+rect(x-10,y-1,20,14,v.shirt);rect(x-8,y+12,6,7,'#75503b');rect(x+3,y+12,6,7,'#75503b');
+ellipse(x-5,y-16,2,3,'#302d32');ellipse(x+5,y-16,2,3,'#302d32');rect(x-2,y-10,4,2,'#633f37');
+if(v.type==='deer'){ellipse(x,y-6,6,4,'#f6d7a2');rect(x-2,y-7,2,2,'#543c32')}
+if(v.type==='cat'){rect(x-11,y-8,3,2,'#f0c6b5');rect(x+8,y-8,3,2,'#f0c6b5')}
+if(v.type==='bear'){ellipse(x-10,y-25,5,5,v.color);ellipse(x+10,y-25,5,5,v.color)}
+if(Math.hypot(px-x,py-y)<48&&!dialogue){text('…',x-5,y-34,13,'#fff3a5')}
+}
+function drawPlayer(){
+let x=px,y=py;ellipse(x,y+12,12,4,'#52894f');
+const bob=(Math.floor(frame/9)%2===0)?0:1;
+rect(x-8,y-3+bob,6,13,'#8d5740');rect(x+2,y-3+bob,6,13,'#8d5740');
+rect(x-9,y-15+bob,18,17,'#e66e48');rect(x-7,y-13+bob,14,6,'#f4bc63');
+ellipse(x,y-24+bob,11,12,'#f2bf8b');rect(x-10,y-29+bob,20,7,'#6d4636');rect(x-9,y-33+bob,16,6,'#6d4636');rect(x-8,y-21+bob,3,3,'#382d2d');rect(x+4,y-21+bob,3,3,'#382d2d');
+if(face==='left')rect(x-10,y-21+bob,3,3,'#382d2d');if(face==='right')rect(x+7,y-21+bob,3,3,'#382d2d');
+if(face==='up'){rect(x-8,y-29+bob,16,8,'#6d4636');rect(x-7,y-16+bob,14,7,'#d99a68')}
+}
+function drawOverlay(){// foreground grass depth
+for(let i=0;i<35;i++){let x=(i*71+22)%800,y=455+(i*17)%45;rect(x,y,3,4,'#4c9a59');rect(x+3,y-2,2,4,'#64b96b')}
+}
+function render(){
+ctx.clearRect(0,0,W,H);drawGround();
+houses.forEach(drawHouse);drawPondDetails();trees.forEach(drawTree);drawFlowers();
+// order sprites by y for a little depth
+const sprites=[...villagers.map(v=>({y:v.y,draw:()=>drawAnimal(v)})),{y:py,draw:drawPlayer}].sort((a,b)=>a.y-b.y);sprites.forEach(s=>s.draw());
+drawOverlay();
+// tiny ambient sparkles
+for(let i=0;i<5;i++){let x=(frame*0.35+i*151)%790,y=130+(i*79)%260;if(i%2===0){rect(x,y,2,2,'#fff5ba');rect(x-2,y+1,6,1,'#fff5ba')}}
+}
+function say(speaker,line){document.getElementById('speaker').textContent=speaker;document.getElementById('line').textContent=line;document.getElementById('dialog').style.display='block';dialogue=true}
+function toast(s){let el=document.getElementById('toast');el.textContent=s;el.style.opacity=1;toastTimer=115}
+function interact(){
+if(dialogue){document.getElementById('dialog').style.display='none';dialogue=false;return}
+let v=villagers.find(v=>Math.hypot(px-v.x,py-v.y)<53);
+if(v){say(v.name,v.lines[Math.floor(Math.random()*v.lines.length)]);return}
+let tree=trees.find(t=>Math.hypot(px-t.x,py-(t.y+5))<53);
+if(tree&&tree.fruit){tree.fruit=false;fruit+=1;toast('🍎 りんごをひろった！');updateBag();return}
+let flower=flowerspots.find(f=>Math.hypot(px-f.x,py-f.y)<25);
+if(flower){flowers++;toast('🌼 お花をつんだ！');updateBag();return}
+let house=houses.find(h=>px>h.x-15&&px<h.x+h.w+15&&py>h.y-40&&py<h.y+h.h+15);
+if(house){if(house.name==='じぶんの家')say('おうち','いつか家具をたくさん置いて、自分らしいお部屋にしよう！');else say('島のお店','いらっしゃい！ もう少ししたらお店の商品も増えるよ。');return}
+toast('近くに調べられるものはないみたい。');
+}
+function updateBag(){document.getElementById('items').innerHTML=`<div class="item">🍎<br>りんご<br><b>${fruit}</b></div><div class="item">🌼<br>お花<br><b>${flowers}</b></div><div class="item">🐟<br>おさかな<br><b>${fish}</b></div><div class="item">🪵<br>木の枝<br><b>0</b></div><div class="item">🐚<br>貝がら<br><b>0</b></div><div class="item">🪙<br>ベル<br><b>${fruit*20+flowers*10}</b></div>`}
+function move(dx,dy){if(dialogue||bagOpen)return;if(dx||dy){face=Math.abs(dx)>Math.abs(dy)?(dx<0?'left':'right'):(dy<0?'up':'down');px=Math.max(18,Math.min(782,px+dx));py=Math.max(125,Math.min(480,py+dy));frame++}}
+function loop(){if(!dialogue&&!bagOpen){let dx=0,dy=0;if(keys.ArrowLeft||keys.a)dx=-2.4;if(keys.ArrowRight||keys.d)dx=2.4;if(keys.ArrowUp||keys.w)dy=-2.4;if(keys.ArrowDown||keys.s)dy=2.4;if(dx&&dy){dx*=.707;dy*=.707}if(dx||dy){px=Math.max(18,Math.min(782,px+dx));py=Math.max(125,Math.min(480,py+dy));face=Math.abs(dx)>Math.abs(dy)?(dx<0?'left':'right'):(dy<0?'up':'down');frame+=1.3}else frame+=.15}
+dayMinutes=(dayMinutes+.015)%1440;let hh=Math.floor(dayMinutes/60),mm=Math.floor(dayMinutes%60);document.getElementById('time').textContent=(hh<12?'AM':'PM')+' '+(hh%12||12)+':'+String(mm).padStart(2,'0');
+if(toastTimer>0&&!--toastTimer)document.getElementById('toast').style.opacity=0;
+render();requestAnimationFrame(loop)}
+document.addEventListener('keydown',e=>{if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault();keys[e.key]=true;if(e.key===' '||e.key==='Enter'||e.key==='z'||e.key==='Z')interact();if(e.key==='x'||e.key==='X')interact();if(e.key==='i'||e.key==='I'){bagOpen=!bagOpen;document.getElementById('bag').style.display=bagOpen?'block':'none';updateBag()}});
+document.addEventListener('keyup',e=>keys[e.key]=false);
+document.getElementById('talk').onclick=interact;document.getElementById('pick').onclick=interact;
+document.getElementById('next').onclick=()=>{document.getElementById('dialog').style.display='none';dialogue=false};
+document.getElementById('bagbtn').onclick=()=>{bagOpen=true;document.getElementById('bag').style.display='block';updateBag()};
+document.getElementById('closebag').onclick=()=>{bagOpen=false;document.getElementById('bag').style.display='none'};
+document.querySelectorAll('[data-dir]').forEach(b=>{let dir=b.dataset.dir;const start=()=>{keys[{up:'ArrowUp',down:'ArrowDown',left:'ArrowLeft',right:'ArrowRight'}[dir]]=true};const stop=()=>{keys.ArrowUp=keys.ArrowDown=keys.ArrowLeft=keys.ArrowRight=false};b.addEventListener('pointerdown',start);b.addEventListener('pointerup',stop);b.addEventListener('pointerleave',stop);b.addEventListener('pointercancel',stop)});
+updateBag();loop();
+})();
+</script></body></html>
